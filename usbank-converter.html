@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>US Bank PDF to CSV Converter</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f7fa;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; margin-bottom: 10px; }
+    .step {
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    .step h3 { margin-top: 0; color: #495057; }
+    input[type="file"] {
+      width: 100%;
+      padding: 15px;
+      border: 2px dashed #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    input[type="file"]:hover { border-color: #007bff; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button.success { background: #28a745; }
+    button.success:hover { background: #218838; }
+    .status {
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 6px;
+      display: none;
+    }
+    .status.info { background: #e7f3ff; color: #0056b3; display: block; }
+    .status.success { background: #d4edda; color: #155724; display: block; }
+    .status.error { background: #f8d7da; color: #721c24; display: block; }
+    .preview {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 6px;
+      max-height: 500px;
+      overflow-y: auto;
+      display: none;
+    }
+    .preview table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .preview th, .preview td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      font-size: 13px;
+    }
+    .preview th { background: #e9ecef; position: sticky; top: 0; }
+    .progress {
+      background: #e9ecef;
+      height: 10px;
+      border-radius: 5px;
+      overflow: hidden;
+      margin: 15px 0;
+      display: none;
+    }
+    .progress-bar {
+      background: #007bff;
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🏦 US Bank PDF to CSV Converter</h1>
+    <p style="color: #666;">Extract transactions from your US Bank statement. Your data stays on your computer.</p>
+
+    <div class="step">
+      <h3>Step 1: Upload Your PDF</h3>
+      <input type="file" id="pdfFile" accept=".pdf">
+      <div class="progress" id="progress">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="step hidden" id="previewStep">
+      <h3>Step 2: Review Transactions</h3>
+      <p style="font-size: 14px; color: #666;">Found <strong id="count">0</strong> transactions</p>
+      <div id="preview" class="preview"></div>
+      
+      <div style="margin-top: 20px;">
+        <button class="success" onclick="downloadCSV()">📥 Download CSV</button>
+        <button onclick="copyToClipboard()">📋 Copy to Clipboard</button>
+      </div>
+    </div>
+
+    <div class="step hidden" id="manualStep">
+      <h3>Step 3: Alternative - Copy/Paste</h3>
+      <p style="font-size: 14px;">If PDF extraction didn't work well, copy text from your PDF and paste below:</p>
+      <textarea id="manualText" style="width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 6px;" placeholder="Paste transaction text here..."></textarea>
+      <button onclick="processManualText()" style="margin-top: 10px;">Process Pasted Text</button>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+    let extractedTransactions = [];
+
+    document.getElementById('pdfFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const status = document.getElementById('status');
+      const progress = document.getElementById('progress');
+      const progressBar = document.getElementById('progressBar');
+      
+      status.className = 'status info';
+      status.textContent = 'Loading PDF...';
+      progress.style.display = 'block';
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        
+        status.textContent = `Processing ${pdf.numPages} page(s)...`;
+        let fullText = '';
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          fullText += pageText + '\n';
+          
+          progressBar.style.width = `${(i / pdf.numPages) * 100}%`;
+        }
+        
+        status.textContent = 'Extracting transactions...';
+        extractUSBankTransactions(fullText);
+        
+        if (extractedTransactions.length > 0) {
+          status.className = 'status success';
+          status.textContent = `✓ Found ${extractedTransactions.length} transactions!`;
+          showPreview();
+          document.getElementById('previewStep').classList.remove('hidden');
+          document.getElementById('manualStep').classList.remove('hidden');
+        } else {
+          status.className = 'status error';
+          status.textContent = 'No transactions found. Try the copy/paste method below.';
+          document.getElementById('manualStep').classList.remove('hidden');
+        }
+        
+      } catch (error) {
+        console.error(error);
+        status.className = 'status error';
+        status.textContent = `Error: ${error.message}. Try copying text from the PDF instead.`;
+        document.getElementById('manualStep').classList.remove('hidden');
+      }
+    });
+
+    function extractUSBankTransactions(text) {
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      extractedTransactions = [];
+      
+      const dateRegex = /\d{1,2}\/\d{1,2}\/\d{4}/;
+      const amountRegex = /\d{1,3}(,\d{3})*\.\d{2}/;
+      
+      // Skip these words
+      const skipWords = [
+        'TRANSACTION', 'POSTING', 'DESCRIPTION', 'AMOUNT', 'BALANCE',
+        'PAGE', 'ACCOUNT', 'SUMMARY', 'TOTAL', 'PAYMENT', 'CREDIT',
+        'PURCHASE', 'US BANK', 'STATEMENT', 'THROUGH', 'FROM'
+      ];
+      
+      for (const line of lines) {
+        // Skip header/footer lines
+        if (skipWords.some(word => line.toUpperCase().includes(word))) {
+          continue;
+        }
+        
+        const dateMatch = line.match(dateRegex);
+        const amountMatch = line.match(amountRegex);
+        
+        if (dateMatch && amountMatch) {
+          const date = formatDate(dateMatch[0]);
+          const amount = parseFloat(amountMatch[0].replace(/,/g, ''));
+          
+          // Get description (text between date and amount, or nearby)
+          let description = line
+            .replace(dateMatch[0], ' ')
+            .replace(amountMatch[0], ' ')
+            .replace(/[^a-zA-Z0-9\s\-\.]/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .substring(0, 50);
+          
+          if (description.length > 2) {
+            extractedTransactions.push({
+              date: date,
+              category: categorize(description),
+              amount: amount,
+              description: description
+            });
+          }
+        }
+      }
+    }
+
+    function processManualText() {
+      const text = document.getElementById('manualText').value;
+      if (!text) {
+        alert('Please paste some text first');
+        return;
+      }
+      
+      extractUSBankTransactions(text);
+      
+      if (extractedTransactions.length > 0) {
+        alert(`Found ${extractedTransactions.length} transactions!`);
+        showPreview();
+        document.getElementById('previewStep').classList.remove('hidden');
+      } else {
+        alert('No transactions found. Make sure you copied transaction lines with dates and amounts.');
+      }
+    }
+
+    function formatDate(dateStr) {
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        const [month, day, year] = parts;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      }
+      return dateStr;
+    }
+
+    function categorize(description) {
+      const desc = description.toLowerCase();
+      const categories = {
+        'Groceries': ['whole foods', 'trader', 'safeway', 'kroger', 'grocery', 'supermarket', 'food'],
+        'Restaurants': ['restaurant', 'cafe', 'starbucks', 'mcdonald', 'ubereats', 'doordash', 'grubhub', 'pizza'],
+        'Gas': ['shell', 'chevron', 'exxon', 'gas station', 'fuel', '76'],
+        'Entertainment': ['netflix', 'spotify', 'amc', 'cinema', 'hulu', 'disney'],
+        'Shopping': ['amazon', 'target', 'walmart', 'costco', 'ebay'],
+        'Transportation': ['uber', 'lyft', 'parking', 'toll', 'metro'],
+        'Utilities': ['electric', 'water', 'gas bill', 'internet', 'phone'],
+        'Healthcare': ['pharmacy', 'cvs', 'walgreens', 'doctor', 'medical']
+      };
+
+      for (const [category, keywords] of Object.entries(categories)) {
+        if (keywords.some(kw => desc.includes(kw))) {
+          return category;
+        }
+      }
+      return 'Other';
+    }
+
+    function showPreview() {
+      const preview = document.getElementById('preview');
+      const count = document.getElementById('count');
+      
+      count.textContent = extractedTransactions.length;
+      preview.style.display = 'block';
+      
+      preview.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Amount</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${extractedTransactions.slice(0, 50).map(t => `
+              <tr>
+                <td>${t.date}</td>
+                <td>${t.category}</td>
+                <td>$${t.amount.toFixed(2)}</td>
+                <td>${t.description}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ${extractedTransactions.length > 50 ? `<p style="margin-top: 10px; color: #666;">...and ${extractedTransactions.length - 50} more</p>` : ''}
+      `;
+    }
+
+    function downloadCSV() {
+      const csv = 'Date,Category,Amount,Description\n' + 
+        extractedTransactions.map(t => 
+          `${t.date},${t.category},${t.amount.toFixed(2)},"${t.description.replace(/"/g, '""')}"`
+        ).join('\n');
+      
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `usbank-transactions-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function copyToClipboard() {
+      const csv = 'Date,Category,Amount,Description\n' + 
+        extractedTransactions.map(t => 
+          `${t.date},${t.category},${t.amount.toFixed(2)},"${t.description.replace(/"/g, '""')}"`
+        ).join('\n');
+      
+      navigator.clipboard.writeText(csv).then(() => {
+        alert('CSV copied to clipboard! Paste it into your Budget Dashboard.');
+      });
+    }
+  </script>
+</body>
+</html>

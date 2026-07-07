@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank CSV Converter</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f7fa;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; margin-bottom: 10px; }
+    p { color: #666; margin-bottom: 25px; }
+    .step {
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    .step h3 { margin-top: 0; color: #495057; }
+    label { display: block; margin-bottom: 8px; font-weight: 500; color: #495057; }
+    select, input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover { background: #0056b3; }
+    button.secondary {
+      background: #6c757d;
+    }
+    button.secondary:hover { background: #545b62; }
+    .output {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+    .success { color: #28a745; }
+    .warning { color: #ffc107; }
+    .info { color: #17a2b8; margin-top: 15px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🏦 Bank CSV Converter</h1>
+    <p>Convert your bank's CSV export into Budget Dashboard format. <strong>Your data stays on your computer—nothing is uploaded.</strong></p>
+
+    <div class="step">
+      <h3>Step 1: Select Your Bank Format</h3>
+      <label for="bankFormat">Your Bank:</label>
+      <select id="bankFormat">
+        <option value="chase">Chase</option>
+        <option value="bofa">Bank of America</option>
+        <option value="wells">Wells Fargo</option>
+        <option value="citi">Citibank</option>
+        <option value="capitalone">Capital One</option>
+        <option value="generic">Generic (Date, Description, Amount)</option>
+      </select>
+    </div>
+
+    <div class="step">
+      <h3>Step 2: Upload Your CSV</h3>
+      <label for="csvFile">Choose CSV file:</label>
+      <input type="file" id="csvFile" accept=".csv">
+    </div>
+
+    <div class="step">
+      <h3>Step 3: Map Columns (if needed)</h3>
+      <label for="dateColumn">Date Column:</label>
+      <select id="dateColumn"></select>
+      
+      <label for="descColumn">Description Column:</label>
+      <select id="descColumn"></select>
+      
+      <label for="amountColumn">Amount Column:</label>
+      <select id="amountColumn"></select>
+    </div>
+
+    <div class="step">
+      <h3>Step 4: Download</h3>
+      <button onclick="convert()">Convert & Download</button>
+      <button class="secondary" onclick="clearAll()">Clear</button>
+      <div id="output" class="output"></div>
+      <p class="info" id="info"></p>
+    </div>
+  </div>
+
+  <script>
+    let csvData = [];
+    let headers = [];
+
+    document.getElementById('csvFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      headers = parseCSVLine(lines[0]);
+      csvData = lines.slice(1).map(line => parseCSVLine(line));
+
+      // Populate column selectors
+      const selectors = ['dateColumn', 'descColumn', 'amountColumn'];
+      selectors.forEach(id => {
+        const select = document.getElementById(id);
+        select.innerHTML = headers.map((h, i) => 
+          `<option value="${i}">${h}</option>`
+        ).join('');
+      });
+
+      // Auto-detect common column names
+      autoSelect('dateColumn', ['date', 'transaction date', 'posted date']);
+      autoSelect('descColumn', ['description', 'merchant', 'name', 'details']);
+      autoSelect('amountColumn', ['amount', 'debit', 'credit', 'value']);
+
+      document.getElementById('info').textContent = `Loaded ${csvData.length} transactions`;
+    });
+
+    function parseCSVLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    }
+
+    function autoSelect(selectId, keywords) {
+      const select = document.getElementById(selectId);
+      for (let i = 0; i < headers.length; i++) {
+        const header = headers[i].toLowerCase();
+        if (keywords.some(kw => header.includes(kw))) {
+          select.value = i;
+          return;
+        }
+      }
+    }
+
+    function convert() {
+      if (csvData.length === 0) {
+        alert('Please upload a CSV file first');
+        return;
+      }
+
+      const dateIdx = parseInt(document.getElementById('dateColumn').value);
+      const descIdx = parseInt(document.getElementById('descColumn').value);
+      const amountIdx = parseInt(document.getElementById('amountColumn').value);
+
+      // Create expenses data
+      const expenses = csvData.map(row => {
+        let amount = parseFloat(row[amountIdx]?.replace(/[^0-9.-]/g, '')) || 0;
+        // Handle credits as negative (income)
+        if (row[amountIdx]?.includes('(') || row[amountIdx]?.includes('CR')) {
+          amount = -Math.abs(amount);
+        }
+        return {
+          date: formatDate(row[dateIdx]),
+          category: categorize(row[descIdx]),
+          amount: Math.abs(amount),
+          description: row[descIdx] || 'Transaction'
+        };
+      });
+
+      // Generate CSV content
+      const csvContent = 'Date,Category,Amount,Description\n' + 
+        expenses.map(e => `${e.date},${e.category},${e.amount.toFixed(2)},${e.description}`).join('\n');
+
+      // Download file
+      downloadFile(csvContent, 'expenses.csv');
+
+      // Show preview
+      const output = document.getElementById('output');
+      output.style.display = 'block';
+      output.textContent = '✅ Converted ' + expenses.length + ' transactions!\n\nPreview:\n' + 
+        expenses.slice(0, 5).map(e => `  ${e.date} | ${e.category} | $${e.amount}`).join('\n') +
+        '\n  ...';
+      
+      document.getElementById('info').textContent = 'File downloaded! Import expenses.csv into your Budget Dashboard Google Sheet.';
+    }
+
+    function formatDate(dateStr) {
+      // Try to parse various date formats
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        return dateStr; // Return as-is if can't parse
+      }
+      return date.toISOString().split('T')[0];
+    }
+
+    function categorize(description) {
+      const desc = description.toLowerCase();
+      const categories = {
+        'Groceries': ['whole foods', 'trader', 'safeway', 'kroger', 'grocery', 'supermarket'],
+        'Restaurants': ['restaurant', 'cafe', 'starbucks', 'mcdonald', 'ubereats', 'doordash', 'grubhub'],
+        'Gas': ['shell', 'chevron', 'exxon', 'gas station', 'fuel'],
+        'Entertainment': ['netflix', 'spotify', 'amc', 'cinema', 'hulu', 'disney'],
+        'Shopping': ['amazon', 'target', 'walmart', 'costco'],
+        'Transportation': ['uber', 'lyft', 'parking', 'toll'],
+        'Utilities': ['electric', 'water', 'gas bill', 'internet', 'phone']
+      };
+
+      for (const [category, keywords] of Object.entries(categories)) {
+        if (keywords.some(kw => desc.includes(kw))) {
+          return category;
+        }
+      }
+      return 'Other';
+    }
+
+    function downloadFile(content, filename) {
+      const blob = new Blob([content], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function clearAll() {
+      document.getElementById('csvFile').value = '';
+      document.getElementById('output').style.display = 'none';
+      document.getElementById('info').textContent = '';
+      csvData = [];
+      headers = [];
+    }
+  </script>
+</body>
+</html>

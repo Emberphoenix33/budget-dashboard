@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank PDF to CSV Converter</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f7fa;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    h1 { color: #333; margin-bottom: 10px; }
+    .subtitle { color: #666; margin-bottom: 25px; }
+    .warning {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+    }
+    .step {
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    .step h3 { margin-top: 0; color: #495057; }
+    label { display: block; margin-bottom: 8px; font-weight: 500; color: #495057; }
+    select, input[type="file"], input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    .bank-options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    .bank-option {
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .bank-option:hover { border-color: #007bff; background: #f0f7ff; }
+    .bank-option.selected { border-color: #007bff; background: #e7f1ff; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-top: 10px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #545b62; }
+    .preview {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+      display: none;
+      white-space: pre-wrap;
+    }
+    .preview table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .preview th, .preview td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+    .preview th { background: #e9ecef; }
+    .progress {
+      background: #e9ecef;
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 15px 0;
+      display: none;
+    }
+    .progress-bar {
+      background: #007bff;
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .status { color: #666; font-size: 14px; margin: 10px 0; }
+    .success { color: #28a745; }
+    .error { color: #dc3545; }
+    .tips {
+      background: #e7f3ff;
+      border-left: 4px solid #007bff;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .tips ul { margin: 10px 0 0 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📄 Bank PDF to CSV Converter</h1>
+    <p class="subtitle">Extract transactions from your bank statement PDF. <strong>Your data stays on your computer—nothing is uploaded.</strong></p>
+
+    <div class="warning">
+      ⚠️ <strong>PDF parsing is tricky!</strong> Every bank has different formats. If automatic extraction doesn't work well, you may need to adjust the patterns or copy/paste from your PDF.
+    </div>
+
+    <div class="step">
+      <h3>Step 1: Select Your Bank</h3>
+      <div class="bank-options" id="bankOptions">
+        <div class="bank-option" data-bank="chase">Chase</div>
+        <div class="bank-option" data-bank="bofa">Bank of America</div>
+        <div class="bank-option" data-bank="wells">Wells Fargo</div>
+        <div class="bank-option" data-bank="citi">Citibank</div>
+        <div class="bank-option" data-bank="capitalone">Capital One</div>
+        <div class="bank-option selected" data-bank="usbank">US Bank</div>
+        <div class="bank-option" data-bank="generic">Generic/Other</div>
+      </div>
+      <input type="hidden" id="selectedBank" value="usbank">
+    </div>
+
+    <div class="step">
+      <h3>Step 2: Upload PDF Statement</h3>
+      <label for="pdfFile">Choose PDF file:</label>
+      <input type="file" id="pdfFile" accept=".pdf">
+      <div class="progress" id="progress">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="step">
+      <h3>Step 3: Review & Adjust</h3>
+      <p style="font-size: 14px; color: #666;">Preview extracted transactions. Adjust patterns if needed.</p>
+      <label>Date Pattern (regex):</label>
+      <input type="text" id="datePattern" value="\\d{2}/\\d{2}/\\d{4}" placeholder="e.g., \d{2}/\d{2}/\d{4}">
+      
+      <label>Amount Pattern (regex):</label>
+      <input type="text" id="amountPattern" value="\\$?[\\d,]+\\.\\d{2}" placeholder="e.g., \$?[\d,]+\.\d{2}">
+      
+      <button class="secondary" onclick="reprocess()">Re-process with New Patterns</button>
+    </div>
+
+    <div class="step">
+      <h3>Step 4: Preview & Download</h3>
+      <div id="preview" class="preview"></div>
+      <button onclick="downloadCSV()" id="downloadBtn" style="display: none;">📥 Download CSV</button>
+      <button class="secondary" onclick="copyToClipboard()" id="copyBtn" style="display: none;">📋 Copy to Clipboard</button>
+    </div>
+
+    <div class="tips">
+      <strong>💡 Tips for better extraction:</strong>
+      <ul>
+        <li><strong>US Bank:</strong> Download "transaction activity" PDF from online banking for best results</li>
+        <li>PDFs from online banking work better than scanned statements</li>
+        <li>If extraction fails, try copying text from PDF and pasting into a text editor first</li>
+        <li>Adjust the regex patterns to match your statement's date/amount format</li>
+        <li>Some banks offer CSV export directly—check your bank's website!</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
+    let extractedTransactions = [];
+    let rawText = '';
+
+    // Bank selection
+    document.querySelectorAll('.bank-option').forEach(option => {
+      option.addEventListener('click', () => {
+        document.querySelectorAll('.bank-option').forEach(o => o.classList.remove('selected'));
+        option.classList.add('selected');
+        document.getElementById('selectedBank').value = option.dataset.bank;
+      });
+    });
+
+    // PDF Upload
+    document.getElementById('pdfFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const status = document.getElementById('status');
+      const progress = document.getElementById('progress');
+      const progressBar = document.getElementById('progressBar');
+      
+      progress.style.display = 'block';
+      status.textContent = 'Loading PDF...';
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+        
+        status.textContent = `Processing ${pdf.numPages} page(s)...`;
+        rawText = '';
+        
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          rawText += pageText + '\n';
+          
+          progressBar.style.width = `${(i / pdf.numPages) * 100}%`;
+        }
+        
+        status.textContent = 'Extracting transactions...';
+        extractTransactions();
+        
+        status.innerHTML = `<span class="success">✓ Found ${extractedTransactions.length} transactions!</span>`;
+        showPreview();
+        
+      } catch (error) {
+        console.error(error);
+        status.innerHTML = `<span class="error">Error: ${error.message}</span>`;
+      }
+    });
+
+    function extractTransactions() {
+      const bank = document.getElementById('selectedBank').value;
+      
+      // Bank-specific extraction logic
+      extractedTransactions = [];
+      
+      if (bank === 'usbank') {
+        extractUSBank();
+      } else {
+        extractGeneric();
+      }
+      
+      // Remove duplicates
+      extractedTransactions = extractedTransactions.filter((t, i, arr) => 
+        i === arr.findIndex(x => x.date === t.date && x.amount === t.amount)
+      );
+      
+      if (extractedTransactions.length === 0) {
+        alert('No transactions found. Try selecting "Generic/Other" or adjust the patterns.');
+      }
+    }
+    
+    function extractUSBank() {
+      // US Bank specific extraction
+      // Look for lines with: Date, Description, and Amount
+      const lines = rawText.split('\n').filter(line => line.trim());
+      
+      const datePattern = /\d{1,2}\/\d{1,2}\/\d{4}/;
+      const amountPattern = /[\d,]+\.\d{2}/;
+      
+      let currentDate = null;
+      
+      for (const line of lines) {
+        const dateMatch = line.match(datePattern);
+        const amountMatch = line.match(amountPattern);
+        
+        // Skip header lines and balances
+        if (line.includes('TRANSACTION DATE') || 
+            line.includes('POSTING DATE') || 
+            line.includes('DESCRIPTION') ||
+            line.includes('Amount') ||
+            line.includes('Balance') ||
+            line.includes('Page ') ||
+            line.includes('Account Summary')) {
+          continue;
+        }
+        
+        if (dateMatch) {
+          currentDate = formatDate(dateMatch[0]);
+        }
+        
+        if (amountMatch) {
+          // Find the amount (could be debit or credit)
+          let amount = parseFloat(amountMatch[0].replace(/,/g, ''));
+          
+          // Check if it's a debit (usually shown with minus or in specific column)
+          const isDebit = line.includes('-') || 
+                         line.match(/\(\d/) || 
+                         line.includes('DEBIT') ||
+                         (line.match(/-\d/) !== null);
+          
+          // Extract description - everything between date and amount
+          let description = line;
+          if (dateMatch) description = description.replace(dateMatch[0], '');
+          if (amountMatch) description = description.replace(amountMatch[0], '');
+          
+          description = description
+            .replace(/[^a-zA-Z0-9\s\-\.]/g, '')
+            .trim()
+            .substring(0, 50);
+          
+          // Skip if description is too short (likely not a transaction)
+          if (description.length < 2) continue;
+          
+          extractedTransactions.push({
+            date: currentDate || formatDate(dateMatch[0]),
+            category: categorize(description),
+            amount: Math.abs(amount),
+            description: description || 'Transaction'
+          });
+        }
+      }
+    }
+    
+    function extractGeneric() {
+      const datePattern = document.getElementById('datePattern').value;
+      const amountPattern = document.getElementById('amountPattern').value;
+      
+      const dateRegex = new RegExp(datePattern, 'g');
+      const amountRegex = new RegExp(amountPattern, 'g');
+      
+      const lines = rawText.split(/\n/).filter(line => line.trim());
+      
+      lines.forEach(line => {
+        const dates = line.match(dateRegex);
+        const amounts = line.match(amountRegex);
+        
+        if (dates && amounts) {
+          let description = line;
+          if (dates[0]) description = description.replace(dates[0], '');
+          if (amounts[amounts.length - 1]) description = description.replace(amounts[amounts.length - 1], '');
+          
+          description = description
+            .replace(/[^a-zA-Z0-9\s\-\.]/g, '')
+            .trim()
+            .substring(0, 50);
+          
+          let amount = parseFloat(amounts[amounts.length - 1].replace(/[$,]/g, ''));
+          
+          if (line.includes('DEBIT') || line.includes('-') || line.includes('(')) {
+            amount = Math.abs(amount);
+          }
+          
+          extractedTransactions.push({
+            date: formatDate(dates[0]),
+            category: categorize(description),
+            amount: Math.abs(amount),
+            description: description || 'Transaction'
+          });
+        }
+      });
+    }
+
+    function reprocess() {
+      if (!rawText) {
+        alert('Please upload a PDF first');
+        return;
+      }
+      extractTransactions();
+      document.getElementById('status').innerHTML = `<span class="success">✓ Found ${extractedTransactions.length} transactions!</span>`;
+      showPreview();
+    }
+
+    function formatDate(dateStr) {
+      // Try various date formats
+      const formats = [
+        /(\d{2})\/(\d{2})\/(\d{4})/,  // MM/DD/YYYY
+        /(\d{2})-(\d{2})-(\d{4})/,    // MM-DD-YYYY
+        /(\d{4})-(\d{2})-(\d{2})/,    // YYYY-MM-DD
+        /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/, // M/D/YY
+      ];
+      
+      for (const format of formats) {
+        const match = dateStr.match(format);
+        if (match) {
+          let month, day, year;
+          if (format.source.includes('YYYY')) {
+            [null, month, day, year] = match;
+          } else {
+            [null, month, day, year] = match;
+            year = year.length === 2 ? '20' + year : year;
+          }
+          return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+      }
+      return dateStr;
+    }
+
+    function categorize(description) {
+      const desc = description.toLowerCase();
+      const categories = {
+        'Groceries': ['whole foods', 'trader', 'safeway', 'kroger', 'grocery', 'supermarket', 'food'],
+        'Restaurants': ['restaurant', 'cafe', 'starbucks', 'mcdonald', 'ubereats', 'doordash', 'grubhub', 'pizza'],
+        'Gas': ['shell', 'chevron', 'exxon', 'gas station', 'fuel', '76'],
+        'Entertainment': ['netflix', 'spotify', 'amc', 'cinema', 'hulu', 'disney', 'amazon prime'],
+        'Shopping': ['amazon', 'target', 'walmart', 'costco', 'ebay'],
+        'Transportation': ['uber', 'lyft', 'parking', 'toll', 'metro'],
+        'Utilities': ['electric', 'water', 'gas bill', 'internet', 'phone', 'pg&e'],
+        'Healthcare': ['pharmacy', 'cvs', 'walgreens', 'doctor', 'medical']
+      };
+
+      for (const [category, keywords] of Object.entries(categories)) {
+        if (keywords.some(kw => desc.includes(kw))) {
+          return category;
+        }
+      }
+      return 'Other';
+    }
+
+    function showPreview() {
+      const preview = document.getElementById('preview');
+      if (extractedTransactions.length === 0) {
+        preview.style.display = 'block';
+        preview.textContent = 'No transactions found. Try adjusting the patterns or select a different bank format.';
+        return;
+      }
+      
+      preview.style.display = 'block';
+      preview.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Amount</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${extractedTransactions.slice(0, 20).map(t => `
+              <tr>
+                <td>${t.date}</td>
+                <td>${t.category}</td>
+                <td>$${t.amount.toFixed(2)}</td>
+                <td>${t.description}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ${extractedTransactions.length > 20 ? `<p style="margin-top: 10px; color: #666;">...and ${extractedTransactions.length - 20} more</p>` : ''}
+      `;
+      
+      document.getElementById('downloadBtn').style.display = 'inline-block';
+      document.getElementById('copyBtn').style.display = 'inline-block';
+    }
+
+    function downloadCSV() {
+      const csv = 'Date,Category,Amount,Description\n' + 
+        extractedTransactions.map(t => 
+          `${t.date},${t.category},${t.amount.toFixed(2)},"${t.description.replace(/"/g, '""')}"`
+        ).join('\n');
+      
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bank-transactions-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function copyToClipboard() {
+      const csv = 'Date,Category,Amount,Description\n' + 
+        extractedTransactions.map(t => 
+          `${t.date},${t.category},${t.amount.toFixed(2)},"${t.description.replace(/"/g, '""')}"`
+        ).join('\n');
+      
+      navigator.clipboard.writeText(csv).then(() => {
+        alert('CSV copied to clipboard! You can paste it directly into your Budget Dashboard.');
+      });
+    }
+  </script>
+</body>
+</html>
