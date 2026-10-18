@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Card, ProgressBar, Button, Modal, Form, Row, Col } from 'react-bootstrap';
-import { getBudgets, addExpense, SHEETS } from '../utils/googleSheets';
 
 function BudgetCard({ category, limit, spent, month }) {
   const percentage = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
